@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交互式周期函数可视化</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .left-panel {
+            flex: 1;
+            min-width: 300px;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .right-panel {
+            flex: 2;
+            min-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .chart-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #functionChart {
+            height: 300px;
+        }
+        #pointCloud3D {
+            height: 400px;
+        }
+        #pointCloud2D {
+            height: 300px;
+        }
+        .error {
+            color: red;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>交互式周期函数可视化</h1>
+    <div class="container">
+        <div class="left-panel">
+            <h3>函数设置</h3>
+            <div class="input-group">
+                <label for="functionInput">周期函数 f(t):</label>
+                <input type="text" id="functionInput" value="cos(2 * pi * t) + 0.5 * sin(4 * pi * t)" placeholder="例如: cos(2 * pi * t) + 0.5 * sin(4 * pi * t)">
+                <div class="error" id="functionError"></div>
+            </div>
+            <div class="input-group">
+                <label for="periodInput">周期:</label>
+                <input type="number" id="periodInput" value="1" min="0.1" step="0.1">
+            </div>
+            <div class="input-group">
+                <label for="samplesInput">采样点数:</label>
+                <input type="number" id="samplesInput" value="100" min="50" max="300" step="10">
+            </div>
+            <div class="input-group">
+                <label for="windowSizeInput">滑动窗口大小 M:</label>
+                <input type="number" id="windowSizeInput" value="10" min="5" max="30" step="1">
+            </div>
+            <button onclick="updateVisualization()">更新可视化</button>
+            
+            <h3>函数图像</h3>
+            <div class="chart-container">
+                <canvas id="functionChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="right-panel">
+            <div class="chart-container">
+                <h3>三维点云</h3>
+                <div id="pointCloud3D"></div>
+            </div>
+            <div class="chart-container">
+                <h3>二维降维</h3>
+                <canvas id="pointCloud2D"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- 内联Chart.js -->
+    <script>
+        // 简化版Chart.js，仅用于绘制函数图像
+        class SimpleChart {
+            constructor(ctx, config) {
+                this.ctx = ctx;
+                this.config = config;
+                this.canvas = ctx.canvas;
+            }
+            
+            update() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.drawAxes();
+                this.drawData();
+            }
+            
+            drawAxes() {
+                const ctx = this.ctx;
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+                const padding = 40;
+                
+                // 绘制坐标轴
+                ctx.beginPath();
+                ctx.moveTo(padding, padding);
+                ctx.lineTo(padding, height - padding);
+                ctx.lineTo(width - padding, height - padding);
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // 添加标签
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#333';
+                ctx.textAlign = 'center';
+                ctx.fillText('t', width / 2, height - 10);
+                ctx.save();
+                ctx.translate(20, height / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillText('f(t)', 0, 0);
+                ctx.restore();
+            }
+            
+            drawData() {
+                const ctx = this.ctx;
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+                const padding = 40;
+                const data = this.config.data.datasets[0].data;
+                const labels = this.config.data.labels;
+                
+                if (data.length === 0) return;
+                
+                const xMin = Math.min(...labels);
+                const xMax = Math.max(...labels);
+                const yMin = Math.min(...data);
+                const yMax = Math.max(...data);
+                
+                function xToCanvas(x) {
+                    return padding + (x - xMin) / (xMax - xMin) * (width - 2 * padding);
+                }
+                
+                function yToCanvas(y) {
+                    return height - padding - (y - yMin) / (yMax - yMin) * (height - 2 * padding);
+                }
+                
+                // 绘制曲线
+                ctx.beginPath();
+                for (let i = 0; i < data.length; i++) {
+                    const x = xToCanvas(labels[i]);
+                    const y = yToCanvas(data[i]);
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.strokeStyle = this.config.data.datasets[0].borderColor;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+    </script>
+
+    <!-- 内联Three.js简化版 -->
+    <script>
+        // 简化版Three.js，仅用于绘制基本的3D点云，支持鼠标交互
+        class Simple3DScene {
+            constructor(container) {
+                this.container = container;
+                this.width = container.clientWidth;
+                this.height = container.clientHeight;
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = this.width;
+                this.canvas.height = this.height;
+                container.appendChild(this.canvas);
+                this.ctx = this.canvas.getContext('2d');
+                this.points = [];
+                this.colors = [];
+                
+                // 视角参数
+                this.rotationX = 0;
+                this.rotationY = 0;
+                this.isDragging = false;
+                this.lastMouseX = 0;
+                this.lastMouseY = 0;
+                
+                // 添加鼠标事件监听
+                this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
+                this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+                this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
+                this.canvas.addEventListener('mouseleave', this.handleMouseUp.bind(this));
+            }
+            
+            handleMouseDown(event) {
+                this.isDragging = true;
+                this.lastMouseX = event.clientX;
+                this.lastMouseY = event.clientY;
+            }
+            
+            handleMouseMove(event) {
+                if (!this.isDragging) return;
+                
+                const deltaX = event.clientX - this.lastMouseX;
+                const deltaY = event.clientY - this.lastMouseY;
+                
+                this.rotationY += deltaX * 0.01;
+                this.rotationX += deltaY * 0.01;
+                
+                // 限制X轴旋转范围
+                this.rotationX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.rotationX));
+                
+                this.lastMouseX = event.clientX;
+                this.lastMouseY = event.clientY;
+                
+                this.render();
+            }
+            
+            handleMouseUp() {
+                this.isDragging = false;
+            }
+            
+            addPoints(points, colors) {
+                this.points = points;
+                this.colors = colors;
+                this.render();
+            }
+            
+            render() {
+                const ctx = this.ctx;
+                const width = this.width;
+                const height = this.height;
+                
+                ctx.clearRect(0, 0, width, height);
+                
+                // 绘制坐标轴
+                ctx.beginPath();
+                ctx.moveTo(width / 2, 50);
+                ctx.lineTo(width / 2, height - 50);
+                ctx.lineTo(width - 50, height / 2);
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                if (this.points.length === 0) return;
+                
+                // 计算点的边界
+                const xValues = this.points.map(p => p[0]);
+                const yValues = this.points.map(p => p[1]);
+                const zValues = this.points.map(p => p[2]);
+                const xMin = Math.min(...xValues);
+                const xMax = Math.max(...xValues);
+                const yMin = Math.min(...yValues);
+                const yMax = Math.max(...yValues);
+                const zMin = Math.min(...zValues);
+                const zMax = Math.max(...zValues);
+                
+                // 旋转变换
+                function rotatePoint(point, rotationX, rotationY) {
+                    let [x, y, z] = point;
+                    
+                    // 绕Y轴旋转
+                    const cosY = Math.cos(rotationY);
+                    const sinY = Math.sin(rotationY);
+                    const x1 = x * cosY - z * sinY;
+                    const z1 = x * sinY + z * cosY;
+                    
+                    // 绕X轴旋转
+                    const cosX = Math.cos(rotationX);
+                    const sinX = Math.sin(rotationX);
+                    const y1 = y * cosX - z1 * sinX;
+                    const z2 = y * sinX + z1 * cosX;
+                    
+                    return [x1, y1, z2];
+                }
+                
+                // 简单的3D到2D投影
+                function project3DTo2D(point) {
+                    const [x, y, z] = point;
+                    // 简单的透视投影
+                    const scale = 150 / (z - zMin + 5);
+                    const screenX = width / 2 + (x - (xMin + xMax) / 2) * scale;
+                    const screenY = height / 2 - (y - (yMin + yMax) / 2) * scale;
+                    return [screenX, screenY];
+                }
+                
+                // 绘制点
+                for (let i = 0; i < this.points.length; i++) {
+                    const rotatedPoint = rotatePoint(this.points[i], this.rotationX, this.rotationY);
+                    const [x, y] = project3DTo2D(rotatedPoint);
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fillStyle = this.colors[i];
+                    ctx.fill();
+                }
+            }
+        }
+    </script>
+
+    <script type="module">
+        // 全局变量
+        let functionChart = null;
+        let pointCloud2DChart = null;
+        let simple3DScene = null;
+        
+        // 初始化函数
+        function init() {
+            try {
+                // 初始化函数图像
+                initFunctionChart();
+                // 初始化三维点云
+                init3DScene();
+                // 初始化二维点云
+                init2DPointCloud();
+                // 初始更新
+                updateVisualization();
+            } catch (error) {
+                console.error('初始化错误:', error);
+                document.getElementById('functionError').textContent = '初始化错误: ' + error.message;
+            }
+        }
+        
+        // 初始化函数图像
+        function initFunctionChart() {
+            try {
+                const ctx = document.getElementById('functionChart').getContext('2d');
+                functionChart = new SimpleChart(ctx, {
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'f(t)',
+                            data: [],
+                            borderColor: 'rgb(75, 192, 192)'
+                        }]
+                    }
+                });
+            } catch (error) {
+                console.error('初始化函数图像错误:', error);
+                throw error;
+            }
+        }
+        
+        // 初始化三维场景
+        function init3DScene() {
+            try {
+                const container = document.getElementById('pointCloud3D');
+                simple3DScene = new Simple3DScene(container);
+            } catch (error) {
+                console.error('初始化三维场景错误:', error);
+                throw error;
+            }
+        }
+        
+        // 初始化二维点云
+        function init2DPointCloud() {
+            try {
+                const ctx = document.getElementById('pointCloud2D').getContext('2d');
+                pointCloud2DChart = new SimpleChart(ctx, {
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'MDS降维',
+                            data: [],
+                            borderColor: 'rgb(255, 99, 132)'
+                        }]
+                    }
+                });
+            } catch (error) {
+                console.error('初始化二维点云错误:', error);
+                throw error;
+            }
+        }
+        
+        // 解析用户输入的函数
+        function parseFunction(functionStr) {
+            try {
+                // 将数学格式转换为JavaScript代码格式
+                let jsCode = functionStr
+                    .replace(/\bcos\b/g, 'Math.cos')
+                    .replace(/\bsin\b/g, 'Math.sin')
+                    .replace(/\btan\b/g, 'Math.tan')
+                    .replace(/\bpi\b/g, 'Math.PI')
+                    .replace(/\bsqrt\b/g, 'Math.sqrt')
+                    .replace(/\bpow\b/g, 'Math.pow');
+                
+                // 创建一个函数，接受t作为参数
+                const func = new Function('t', 'return ' + jsCode);
+                // 测试函数是否可以正常执行
+                func(0);
+                return func;
+            } catch (error) {
+                document.getElementById('functionError').textContent = '函数解析错误: ' + error.message;
+                return null;
+            }
+        }
+        
+        // 生成颜色
+        function getColor(tValue, maxT) {
+            const ratio = tValue / maxT;
+            const r = Math.floor(255 * ratio);
+            const g = Math.floor(255 * (1 - Math.abs(2 * ratio - 1)));
+            const b = Math.floor(255 * (1 - ratio));
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+        
+        // 计算距离矩阵
+        function computeDistanceMatrix(data) {
+            const n = data.length;
+            const distMatrix = [];
+            for (let i = 0; i < n; i++) {
+                distMatrix[i] = [];
+                for (let j = 0; j < n; j++) {
+                    let sum = 0;
+                    for (let k = 0; k < data[i].length; k++) {
+                        sum += Math.pow(data[i][k] - data[j][k], 2);
+                    }
+                    distMatrix[i][j] = Math.sqrt(sum);
+                }
+            }
+            return distMatrix;
+        }
+        
+        // 多维缩放 (MDS) 实现 - 优化版本
+        function mds(distMatrix, dimensions) {
+            const n = distMatrix.length;
+            
+            // 计算距离矩阵的平方
+            const distSquared = [];
+            for (let i = 0; i < n; i++) {
+                distSquared[i] = [];
+                for (let j = 0; j < n; j++) {
+                    distSquared[i][j] = Math.pow(distMatrix[i][j], 2);
+                }
+            }
+            
+            // 计算行和列的平均值
+            const rowMeans = [];
+            const colMeans = [];
+            let totalMean = 0;
+            
+            for (let i = 0; i < n; i++) {
+                let rowSum = 0;
+                for (let j = 0; j < n; j++) {
+                    rowSum += distSquared[i][j];
+                }
+                rowMeans[i] = rowSum / n;
+                totalMean += rowSum;
+            }
+            totalMean /= n * n;
+            
+            for (let j = 0; j < n; j++) {
+                let colSum = 0;
+                for (let i = 0; i < n; i++) {
+                    colSum += distSquared[i][j];
+                }
+                colMeans[j] = colSum / n;
+            }
+            
+            // 计算B矩阵（中心化后的矩阵）
+            const B = [];
+            for (let i = 0; i < n; i++) {
+                B[i] = [];
+                for (let j = 0; j < n; j++) {
+                    B[i][j] = -0.5 * (distSquared[i][j] - rowMeans[i] - colMeans[j] + totalMean);
+                }
+            }
+            
+            // 简化的特征值分解（使用幂法近似）
+            function powerMethod(matrix, iterations) {
+                let vector = [];
+                for (let i = 0; i < matrix.length; i++) {
+                    vector.push(Math.random());
+                }
+                
+                for (let iter = 0; iter < iterations; iter++) {
+                    const newVector = [];
+                    for (let i = 0; i < matrix.length; i++) {
+                        let sum = 0;
+                        for (let j = 0; j < matrix[i].length; j++) {
+                            sum += matrix[i][j] * vector[j];
+                        }
+                        newVector[i] = sum;
+                    }
+                    
+                    // 归一化
+                    const norm = Math.sqrt(newVector.reduce((sum, val) => sum + val*val, 0));
+                    if (norm === 0) break;
+                    for (let i = 0; i < newVector.length; i++) {
+                        vector[i] = newVector[i] / norm;
+                    }
+                }
+                
+                // 计算特征值
+                let eigenvalue = 0;
+                for (let i = 0; i < matrix.length; i++) {
+                    let sum = 0;
+                    for (let j = 0; j < matrix[i].length; j++) {
+                        sum += matrix[i][j] * vector[j];
+                    }
+                    eigenvalue += sum * vector[i];
+                }
+                
+                return { eigenvalue, eigenvector: vector };
+            }
+            
+            // 获取前d个特征向量
+            const eigenvectors = [];
+            const eigenvalues = [];
+            
+            for (let d = 0; d < dimensions; d++) {
+                const result = powerMethod(B, 50); // 减少迭代次数提高性能
+                eigenvalues.push(result.eigenvalue);
+                eigenvectors.push(result.eigenvector);
+                
+                // 从B中减去当前特征向量的贡献
+                for (let i = 0; i < n; i++) {
+                    for (let j = 0; j < n; j++) {
+                        B[i][j] -= result.eigenvalue * result.eigenvector[i] * result.eigenvector[j];
+                    }
+                }
+            }
+            
+            // 构造嵌入
+            const embedding = [];
+            for (let i = 0; i < n; i++) {
+                const point = [];
+                for (let d = 0; d < dimensions; d++) {
+                    point.push(eigenvectors[d][i] * Math.sqrt(Math.abs(eigenvalues[d])));
+                }
+                embedding.push(point);
+            }
+            
+            return embedding;
+        }
+        
+        // 更新可视化
+        window.updateVisualization = function() {
+            try {
+                // 清除错误信息
+                document.getElementById('functionError').textContent = '';
+                
+                // 获取用户输入
+                const functionStr = document.getElementById('functionInput').value;
+                const period = parseFloat(document.getElementById('periodInput').value);
+                const n_samples = parseInt(document.getElementById('samplesInput').value);
+                const M = parseInt(document.getElementById('windowSizeInput').value);
+                
+                // 解析函数
+                const f = parseFunction(functionStr);
+                if (!f) return;
+                
+                // 在 [0, period) 区间内均匀采样
+                const t = [];
+                for (let i = 0; i < n_samples; i++) {
+                    t.push(i / n_samples * period);
+                }
+                
+                // 计算采样间隔
+                const tau = t[1] - t[0];
+                
+                // 构造滑动窗口嵌入向量
+                const point_cloud = [];
+                for (let i = 0; i < n_samples; i++) {
+                    const window = [];
+                    for (let j = 0; j <= M; j++) {
+                        const window_time = (t[i] + j * tau) % period;
+                        window.push(f(window_time));
+                    }
+                    point_cloud.push(window);
+                }
+                
+                // 计算距离矩阵并执行MDS
+                const distMatrix = computeDistanceMatrix(point_cloud);
+                const point_cloud_3d = mds(distMatrix, 3);
+                const point_cloud_2d = mds(distMatrix, 2);
+                
+                // 更新函数图像
+                updateFunctionChart(t, f);
+                
+                // 更新三维点云
+                update3DPointCloud(point_cloud_3d, t, period);
+                
+                // 更新二维点云
+                update2DPointCloud(point_cloud_2d, t, period);
+            } catch (error) {
+                console.error('更新可视化错误:', error);
+                document.getElementById('functionError').textContent = '更新可视化错误: ' + error.message;
+            }
+        }
+        
+        // 更新函数图像
+        function updateFunctionChart(t, f) {
+            try {
+                const data = t.map(f);
+                
+                functionChart.config.data.labels = t;
+                functionChart.config.data.datasets[0].data = data;
+                functionChart.update();
+            } catch (error) {
+                console.error('更新函数图像错误:', error);
+                throw error;
+            }
+        }
+        
+        // 更新三维点云
+        function update3DPointCloud(points, t, period) {
+            try {
+                // 生成颜色
+                const colors = t.map(tValue => getColor(tValue, period));
+                simple3DScene.addPoints(points, colors);
+            } catch (error) {
+                console.error('更新三维点云错误:', error);
+                throw error;
+            }
+        }
+        
+        // 更新二维点云
+        function update2DPointCloud(points, t, period) {
+            try {
+                const data = points.map(point => point[1]);
+                const labels = points.map(point => point[0]);
+                
+                pointCloud2DChart.config.data.labels = labels;
+                pointCloud2DChart.config.data.datasets[0].data = data;
+                pointCloud2DChart.update();
+                
+                // 绘制散点
+                const ctx = document.getElementById('pointCloud2D').getContext('2d');
+                const width = ctx.canvas.width;
+                const height = ctx.canvas.height;
+                const padding = 40;
+                
+                const xMin = Math.min(...labels);
+                const xMax = Math.max(...labels);
+                const yMin = Math.min(...data);
+                const yMax = Math.max(...data);
+                
+                function xToCanvas(x) {
+                    return padding + (x - xMin) / (xMax - xMin) * (width - 2 * padding);
+                }
+                
+                function yToCanvas(y) {
+                    return height - padding - (y - yMin) / (yMax - yMin) * (height - 2 * padding);
+                }
+                
+                // 绘制散点
+                for (let i = 0; i < points.length; i++) {
+                    const x = xToCanvas(labels[i]);
+                    const y = yToCanvas(data[i]);
+                    const color = getColor(t[i], period);
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                }
+            } catch (error) {
+                console.error('更新二维点云错误:', error);
+                throw error;
+            }
+        }
+        
+        // 初始化
+        window.onload = init;
+        
+        // 响应窗口大小变化
+        window.onresize = function() {
+            try {
+                const container = document.getElementById('pointCloud3D');
+                if (simple3DScene) {
+                    simple3DScene.width = container.clientWidth;
+                    simple3DScene.height = container.clientHeight;
+                    simple3DScene.canvas.width = simple3DScene.width;
+                    simple3DScene.canvas.height = simple3DScene.height;
+                    simple3DScene.render();
+                }
+            } catch (error) {
+                console.error('窗口大小变化错误:', error);
+            }
+        };
+    </script>
+</body>
+</html>
